@@ -1,4 +1,4 @@
-# Retrieve current Stock Price report on Web using RDP Library and ASP.NET Core Blazor
+# Build .NET Core Blazor app to retrieve market price report using RDP Library
 
 ## Introduction 
 
