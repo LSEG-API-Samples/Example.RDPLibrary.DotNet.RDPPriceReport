@@ -1,0 +1,868 @@
+﻿@page "/stockpricereport"
+@using Refinitiv.DataPlatform.Core
+@using RdpRealTimePricing.Model.Enum
+@using RdpRealTimePricing.Events
+@using RdpRealTimePricing.Model.MarketData
+@using RdpRealTimePricing.Model.Data
+@using ChainExpanderLib;
+@using CsvHelper
+@using RdpPriceReportApp.ViewModel
+@using System.Globalization
+@using System.IO
+@using System.Dynamic
+@using RdpRealTimePricing.Extensions
+@implements IDisposable
+@inject RdpSession RdpSession
+@inject RdpMarketPriceService RdpMarketPriceService
+@inject NavigationManager NavigationManager
+@inject NotificationService NotificationService
+@inject DialogService DialogService
+@inject AppData AppData
+@inject ExportData ExportData
+
+
+<h3>RDP Real-Time Pricing </h3>
+
+<div class="row">
+    <div class="col-md-12">
+        Hello @(AppData.CurrentUserName) <RadzenButton Click="@((args) => Click(args, "LogoffBtn"))" Text="Logoff" Icon="exit_to_app" Style="margin-bottom: 20px;  background-color: darkcyan" />
+    </div>
+</div>
+
+<div class="row">
+
+    <div class="col-md-12">
+        RIC: <RadzenTextBox Placeholder="Enter RIC name..." @bind-Value="InputRics" Style="margin-bottom: 20px;" />
+        <RadzenButton Disabled="@(_isRetreiving)" Click="@((args) => Click(args, "FetchBtn"))" Text="Fetch" Icon="search" Style="margin-bottom: 20px;" />
+        <RadzenCheckBox @bind-Value="@_refreshExistingItem" Style="margin-left: 30px; margin-top: 3px" TValue="bool" />
+        <RadzenLabel Text="Re-request existing RICs" Component="CheckBox1" Style="margin-left: 5px;margin-bottom: 20px" />
+        <RadzenCheckBox @bind-Value="@_verifyIsChain" Style="margin-left: 30px; margin-top: 3px" TValue="bool" />
+        <RadzenLabel Text="Verify and expand Chain" Component="CheckBox2" Style="margin-left: 5px;margin-bottom: 20px" />
+    </div>
+</div>
+<RadzenFieldset AllowCollapse="true" Style="@(_fieldSetVisible?"width:600px;margin-bottom:20px;height:450px":"width:600px;margin-bottom: 20px; height:5px")"
+                Expand="@(() => FieldsetChange("expanded"))" Collapse="@(() => FieldsetChange("collapsed"))">
+    <HeaderTemplate>
+        <span>
+            <RadzenIcon Icon="view_column" /><b style="font-size:20px">Select Fields</b>
+        </span>
+    </HeaderTemplate>
+    <ChildContent>
+        <RadzenCard Visible="@_fieldSetVisible" >
+            <div class="row">
+                <div class="col-md-12">
+                    Add/Remove <br />
+                    <RadzenTextBox Placeholder="Enter field name..." @bind-Value="AddRemoveField" Style="width: 200px;margin-bottom: 20px;" />
+                    <RadzenSplitButton Click="@((args) => OnAddRemove(args, "AddRemoveBtn"))" Icon="compare_arrows" Style="margin-bottom: 20px;">
+                        <ChildContent>
+                            <RadzenSplitButtonItem Text="Add" Value="add" Icon="add_box" />
+                            <RadzenSplitButtonItem Text="Remove" Value="remove" Icon="remove_circle" />
+                        </ChildContent>
+                    </RadzenSplitButton>
+                    <br />
+                    <RadzenListBox AllowFiltering="true" FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive" @bind-Value="@AppData.columnValues" Multiple="true" Data="@defaultFieldList"
+                                   Change="@(args => OnChange(args, "ListBox with multiple selection"))" Style="margin-bottom: 20px; height:250px;width:200px;" />
+
+                    <br />
+
+                </div>
+            </div>
+        </RadzenCard>
+        </ChildContent>
+    </RadzenFieldset>
+
+        <br />
+        @if (AppData.DataCache.Keys.Count > 0)
+        {
+            <div class="row">
+                <div class="col-8"></div>
+                <div class="col-2">
+                    <RadzenButton Click="@((args) => Click(args, "riclist_export"))" Text="RICs" Icon="save_alt" Style="margin-left: 20px; margin-bottom: 20px;" />
+                </div>
+                <div class="col-2">
+                    <RadzenButton Click="@((args) => Click(args, "csv_export"))" Text="CSV" Icon="save_alt" Style="margin-left:20px;margin-bottom:20px;" />
+                </div>
+            </div>
+        }
+        @if (_isRetreiving)
+        {
+            <div class="row">
+                <div class="col-md-12">
+                    <RadzenCard>Downloading Data, please wait... <div class="spinner-grow"></div></RadzenCard>
+                </div>
+            </div>
+
+        }
+
+        <div class="row">
+            <div class="col-md-12">
+                <RadzenCard Disabled="@(_isRetreiving)">
+
+                    @if (AppData.DataCache != null)
+                    {
+                        <div class="row">
+
+                            <RadzenGrid AllowFiltering="true" FilterCaseSensitivity="FilterCaseSensitivity.Default" AllowPaging="true"
+                                        AllowSorting="true" Data="AppData.DataCache.Values.ToList<MarketPriceReport>()" TItem="MarketPriceReport" RowSelect="data => OnRowSelect(data)" ColumnWidth="100px;">
+                                <Columns>
+                                    <RadzenGridColumn TItem="MarketPriceReport" Context="item" Bubble="true" Filterable="false" Sortable="false" TextAlign="TextAlign.Center" Width="40px">
+                                        <Template Context="item">
+                                            <RadzenButton ButtonStyle="ButtonStyle.Danger" Icon="remove_circle" Size="ButtonSize.Small" Click=@((args) => RemoveItem(item)) data-toggle="tooltip" data-placement="top" title="Remove RIC"/>
+                                        </Template>
+                                    </RadzenGridColumn>
+
+                                    @if (AppData.UseRDP)
+                                    {
+                                        <RadzenGridColumn TItem="MarketPriceReport" Context="item" Bubble="true" Filterable="false" Sortable="false" TextAlign="TextAlign.Center" Width="40px">
+                                            <Template Context="item">
+                                                <RadzenButton ButtonStyle="ButtonStyle.Info" Icon="insert_chart_outlined" Size="ButtonSize.Small" Click=@((args) => ShowChart(item)) Visible="@item.IsSelected" data-toggle="tooltip" data-placement="top" title="Display Chart"/>
+                                            </Template>
+                                        </RadzenGridColumn>
+                                    }
+
+                                    <RadzenGridColumn TItem="MarketPriceReport" Property="RicName" Title="RIC" Width="140px">
+                                        <FooterTemplate>
+
+                                            @if (AppData.DataCache.Keys.Any())
+                                            {
+                                                <span>Total:</span>
+                                                @string.Format($"{AppData.DataCache.Keys.Count}")
+                                                <RadzenButton ButtonStyle="ButtonStyle.Warning" Icon="delete_sweep" Size="ButtonSize.Small" Click=@((args) => RemoveItem(null)) data-toggle="tooltip" data-placement="top" title="Remove all RIC"/>
+                                            }
+                                        </FooterTemplate>
+                                    </RadzenGridColumn>
+
+
+                                    @foreach (var key in AppData.columnValues.ToList<string>())
+                                    {
+                                        if (key != null)
+                                        {
+                                            <RadzenGridColumn Filterable="false" Sortable="false" TItem="MarketPriceReport" Property="@key" Title="@key" Width="@(((string) key == "DSPLY_NAME") ? "150px" : "")">
+                                                <Template Context="data">
+                                                    @{
+                                                        if (data != null)
+                                                        {
+                                                            var priceValue = (data.DynamicFields as IDictionary
+                                                                <string, dynamic>);
+                                                            if (priceValue.ContainsKey(key))
+                                                            {
+                                                                <span>@(priceValue[key] != null ? priceValue[key] : string.Empty)</span>
+                                                            }
+                                                            else
+                                                            {
+                                                                <span>@(string.Empty)</span>
+                                                            }
+                                                        }
+                                                    }
+                                                </Template>
+
+                                            </RadzenGridColumn>
+                                        }
+                                    }
+                                </Columns>
+                            </RadzenGrid>
+                        </div>
+                        <br />
+                    }
+                </RadzenCard>
+            </div>
+            <div class="col-md-1" />
+        </div>
+
+        <br />
+
+        @if (AppData.UseRDP && GraphVisible && (_tradePriceItems.Any() || _midPriceItems.Any()))
+        {
+            <div class="row">
+                <div class="col-md-6 col-sm-12 p-4">
+                    <RadzenCard Visible="GraphVisible">
+
+                        <h1>@ChartLabelTxt</h1>
+                        <div class="row">
+                            <div class="col-md-5">
+                                <b>@_companyName.companyTitle</b>
+                            </div>
+                            <div class="col-md-5">
+                                <b>@_companyName.country </b>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-5">
+                                <b>@_companyName.market</b>
+                            </div>
+                            <div class="col-md-5">
+                                <b>@_companyName.sector</b>
+                            </div>
+                        </div>
+                        <br />
+                    </RadzenCard>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-md-6 col-sm-12 p-4">
+                    <RadzenCard>
+                        <RadzenChart>
+                            @if (_trnOvrunsDataItems.Any())
+                            {
+                                <RadzenAreaSeries Smooth="false" Data="@_trnOvrunsDataItems" CategoryProperty="Date" Title="Unscaled Turnover" LineType="LineType.Solid" ValueProperty="TRNOVR_UNS">
+                                    <TooltipTemplate Context="data">
+                                        <div>
+                                            Unscaled Turnover <span>@data.Date.ToString("dddd, dd MMMM yyyy"))</span>
+                                            <strong>@FormatCurrency(@data.TRNOVR_UNS)</strong>
+                                        </div>
+                                    </TooltipTemplate>
+                                </RadzenAreaSeries>
+                            }
+                            @if (_tradePriceItems.Any())
+                            {
+                                <RadzenAreaSeries Smooth="false" Data="@_tradePriceItems" CategoryProperty="Date" Title="TRADE PRICE" LineType="LineType.Solid" ValueProperty="TRDPRC_1" RenderingOrder="1">
+                                    <TooltipTemplate Context="data">
+                                        <div>
+                                            Price <span>@data.Date.ToString("dddd, dd MMMM yyyy")</span>
+                                            <strong>@FormatCurrency(@data.TRDPRC_1)</strong>
+                                        </div>
+                                    </TooltipTemplate>
+                                </RadzenAreaSeries>
+                            }
+                            else if (_midPriceItems.Any())
+                            {
+                                <RadzenAreaSeries Smooth="false" Data="@_midPriceItems" CategoryProperty="Date" Title="MID PRICE" LineType="LineType.Solid" ValueProperty="MID_PRICE">
+                                    <TooltipTemplate Context="data">
+                                        <div>
+                                            Price <span>@data.Date.ToString("dddd, dd MMMM yyyy")</span>
+                                            <strong>@FormatCurrency(@data.MID_PRICE)</strong>
+                                        </div>
+                                    </TooltipTemplate>
+                                </RadzenAreaSeries>
+
+                            }
+                            <RadzenCategoryAxis Padding="20" FormatString="{0:MMM-yy}" />
+                            <RadzenValueAxis Formatter="@FormatCurrency">
+                                <RadzenGridLines Visible="true" />
+                                <RadzenAxisTitle Text=@($"Inter-Day Price Summary {CurrentChartRicName}") />
+                            </RadzenValueAxis>
+                        </RadzenChart>
+                    </RadzenCard>
+                </div>
+            </div>
+
+            @if (!string.IsNullOrEmpty(_companySummary.businessSummary))
+            {
+                <div class="row">
+                    <div class="col-md-6 col-sm-12 p-4">
+                        <RadzenCard Visible="GraphVisible">
+                            <div class="row">
+                                <div class="col">@_companySummary.businessSummary</div>
+                            </div>
+                        </RadzenCard>
+                    </div>
+                </div>
+            }
+        }
+
+@code
+{
+
+    private string CurrentChartRicName { get; set; }
+    private System.Data.DataTable _chartTable = new System.Data.DataTable();
+    private string ChartLabelTxt { get; set; } = string.Empty;
+    public IList<string> GraphColumnsList { get; } = new List<string>();
+    List<MidpriceItem> _midPriceItems = new List<MidpriceItem>();
+    List<TrdprcItem> _tradePriceItems = new List<TrdprcItem>();
+    List<TrnovrunsData> _trnOvrunsDataItems = new List<TrnovrunsData>();
+
+
+    private string SelectedRicName { get; set; } = string.Empty;
+    private bool GraphVisible { get; set; } = false;
+    private string InputRics { get; set; }
+    private string AddRemoveField { get; set; }
+
+    // Dialog Properties
+    private string DialogName { get; set; }
+    private string DialogRespType { get; set; }
+    private string DialogContent { get; set; }
+
+    // To Display Company Info
+    private CompanyBusinessSummary _companySummary = new CompanyBusinessSummary();
+    private CompanyName _companyName = new CompanyName();
+
+    // ChainExander Library
+    private ChainExpander _chainExpander;
+
+    IEnumerable<string> defaultFieldList = new List<string> { "DSPLY_NAME", "TRDPRC_1", "TRDVOL_1","TRADE_DATE","TRDTIM_1","RDN_EXCHID","SALTIM", "PCTCHNG", "OPEN_PRC", "HST_CLOSE", "BID", "OPEN_BID", "BIDSIZE", "ASK", "ASKSIZE", "OPEN_ASK", "HIGH_1", "LOW_1", "CURRENCY", "QUOTIM", "VWAP_VOL", "VWAP_TN", "QUOTE_DATE", "OFF_CD_IN2", "OFFC_CODE2" };
+
+    Dictionary<string, bool> SubscriptionStatus = new Dictionary<string, bool>();
+    bool _isRetreiving = false;
+    bool _refreshExistingItem = true;
+    bool _verifyIsChain = true;
+    bool _fieldSetVisible =true;
+
+    protected override void OnInitialized()
+    {
+        if (RdpSession.SessionState != Session.State.Opened && !RdpSession.IsLoggedIn)
+            NavigationManager.NavigateTo("Login");
+        else
+        {
+            RdpMarketPriceService.OnErrorEvents += OnItemError;
+            RdpMarketPriceService.OnResponeMessageEvents += OnRespMessage;
+            AppData.AppMenuTxt = "PriceReport";
+            _chainExpander = new ChainExpander(RdpSession.ServiceSession);
+            AppData.columnValues = new List<string> {"DSPLY_NAME", "BID","ASK","OPEN_BID","OPEN_ASK", "HIGH_1", "LOW_1", "CURRENCY", "PCTCHNG", "OPEN_PRC", "HST_CLOSE", "OFF_CD_IN2", "OFFC_CODE2" };
+            var column = AppData.columnValues.ToList<string>();
+            AppData.columnValues = column;
+            var list = defaultFieldList.ToList<string>();
+            list.Sort();
+            defaultFieldList = list;
+        }
+
+    }
+    string FormatCurrency(object value)
+    {
+        return AppData.DataCache.TryGetValue(SelectedRicName, out var temp) ? (temp.Fields.ContainsKey("CURRENCY")?ObjectExtensions.FormatCurrency((double)value, temp.Fields["CURRENCY"], false):$"{value}") : $"{value}";
+    }
+
+
+
+    async void ShowChart(MarketPriceReport item)
+    {
+        GraphVisible = false;
+        var notifymessage = new NotificationMessage()
+        {
+            Summary = $"Gererating Chart",
+            Detail = $"Please wait, application are generating inter-day summary chart for {item.RicName}",
+            Severity = NotificationSeverity.Info,
+            Duration = 4000
+        };
+        await ShowItemNotificationAsync(notifymessage).ConfigureAwait(false);
+        SelectedRicName = item.RicName;
+
+        await GenerateChartAndGetCompanyInfoAsync(item.RicName).ConfigureAwait(false);
+    }
+
+    void OnAddRemove(RadzenSplitButtonItem item, string name)
+    {
+        if (item != null && !string.IsNullOrEmpty(AddRemoveField))
+        {
+            char[] separator = { ',', ' ' };
+            var itemList = AddRemoveField.Split(separator).Select(x => x.Trim()).Where(y => y != string.Empty).ToList<string>();
+            if (item.Value == "add")
+            {
+                var dlist = defaultFieldList.ToList<string>();
+                dlist.AddRange(itemList);
+                dlist.Sort();
+                defaultFieldList = dlist;
+
+                var column = AppData.columnValues.ToList<string>();
+                column.AddRange(itemList);
+                AppData.columnValues = column;
+            }
+            if (item.Value == "remove")
+            {
+                var columns = AppData.columnValues.ToList();
+                var fields = defaultFieldList.ToList();
+                foreach (var field in itemList)
+                {
+                    if (fields.Contains(field))
+                        fields.Remove(field);
+
+                    if (columns.Contains(field))
+                        columns.Remove(field);
+
+                }
+                fields.Sort();
+                AppData.columnValues = columns;
+                defaultFieldList = fields;
+            }
+            AddRemoveField = string.Empty;
+            this?.InvokeAsync(StateHasChanged);
+        }
+
+
+    }
+    void FieldsetChange(string status)
+    {
+        if(status=="expanded")
+        {
+            _fieldSetVisible = true;
+        }
+        if(status== "collapsed")
+        {
+            _fieldSetVisible = false;
+        }
+    }
+    void OnChange(object value, string name)
+    {
+
+
+        AppData.columnValues = ((IEnumerable<string>)value).ToList<string>();
+
+        this?.InvokeAsync(StateHasChanged);
+
+
+    }
+
+    void OnRowSelect(MarketPriceReport data)
+    {
+        Task.Run(() =>
+        {
+            if (!AppData.UseRDP) return;
+            foreach (var marketData in AppData.DataCache.Values)
+            {
+                var dataItem = (MarketPriceReport)marketData;
+                dataItem.IsSelected = dataItem.RicName == data.RicName;
+            }
+
+            this?.InvokeAsync(StateHasChanged);
+        });
+    }
+
+    async Task GenerateChartAndGetCompanyInfoAsync(string item)
+    {
+
+        var rdpCompany = new RdpCompanyInfo();
+        var historical = new RdpHistoricalPricing();
+
+        if (RdpSession != null)
+        {
+            var companyNameTask = rdpCompany.GetCompanyNameAsync(RdpSession.ServiceSession, item.TrimStart('/'));
+            var companySummaryTask = rdpCompany.GetCompanyBusinessSummaryAsync(RdpSession.ServiceSession, item.TrimStart('/'));
+            var companyDataTableTask = historical.GetDailyInterDayPricingAsync(RdpSession.ServiceSession, item.TrimStart('/'), 200);
+
+            var allTask = Task.WhenAll(companyNameTask, companySummaryTask, companyDataTableTask);
+
+            var notifyMessage = new NotificationMessage()
+            {
+                Severity = NotificationSeverity.Error,
+                Duration = 4000
+            };
+            if (allTask.IsFaulted && !allTask.IsCompleted)
+            {
+                if (allTask.Exception != null)
+                {
+                    notifyMessage.Summary = "Exception while generate graph";
+                    notifyMessage.Detail = $"{allTask.Exception.Message}";
+                }
+                await ShowItemNotificationAsync(notifyMessage).ConfigureAwait(false);
+                GraphVisible = false;
+                return;
+            }
+
+            _chartTable = await companyDataTableTask.ConfigureAwait(true);
+            _companySummary = await companySummaryTask.ConfigureAwait(true);
+            _companyName = await companyNameTask.ConfigureAwait(true);
+
+            ChartLabelTxt = $"Inter-Day Daily Price Chart for {item}";
+            if (RdpHistoricalPricing.TryGetSeriesFromDataTable(_chartTable, out _midPriceItems, out _tradePriceItems, out _trnOvrunsDataItems))
+            {
+                notifyMessage.Summary = "Chart Generate Complete";
+                notifyMessage.Detail = $"Already generated Chart for {SelectedRicName}.";
+                notifyMessage.Severity = NotificationSeverity.Success;
+                GraphVisible = true;
+                CurrentChartRicName = item;
+            }
+            else
+            {
+                notifyMessage.Summary = "Chart Generate Failed";
+                notifyMessage.Detail = $"Unable to generate Chart for {SelectedRicName}. No Data";
+                notifyMessage.Severity = NotificationSeverity.Error;
+                notifyMessage.Duration = 5000;
+                GraphVisible = false;
+            }
+            await ShowItemNotificationAsync(notifyMessage).ConfigureAwait(false);
+        }
+    }
+    List<string> GenerateItemListAsync(string input)
+    {
+        SubscriptionStatus.Clear();
+        char[] separator = { ',', ' ' };
+        var itemList = input.Split(separator).Select(x => x.Trim()).Where(y => y != string.Empty).ToList<string>();
+        var newItemList = new List<string>();
+        foreach (var subRic in itemList)
+        {
+            var isChain = false;
+            if (_verifyIsChain)
+                isChain = _chainExpander.IsChainRicAsync(subRic.Trim()).GetAwaiter().GetResult();
+            if (isChain)
+            {
+                var notifymessage = new NotificationMessage()
+                {
+                    Summary = "Expand Chain",
+                    Detail = $"Expanding Chain RIC {subRic}, please wait.",
+                    Severity = NotificationSeverity.Warning,
+                    Duration = 2000
+                };
+                ShowItemNotificationAsync(notifymessage).GetAwaiter().GetResult();
+                var returnList = ExpandChainRicAsync(subRic).GetAwaiter().GetResult();
+                newItemList.AddRange(returnList);
+
+            }
+            else
+            {
+                newItemList.Add(subRic);
+                SubscriptionStatus.Add(subRic, false);
+            }
+
+        }
+
+        return newItemList;
+
+
+    }
+    async void Click(MouseEventArgs args, string buttonName)
+    {
+        if (buttonName == "FetchBtn")
+        {
+            await Task.Run(() =>
+            {
+                _isRetreiving = true;
+                SubscriptionStatus.Clear();
+                this?.InvokeAsync(StateHasChanged);
+                var newItemList = new List<string>();
+
+                if (AppData != null && _refreshExistingItem)
+                {
+
+                    var existingList = AppData.DataCache.Keys.ToList<string>();
+                    var count = AppData.DataCache.Keys.Count;
+
+                    foreach (var ric in AppData.DataCache.Keys)
+                    {
+
+                        RdpMarketPriceService.CloseItemStreamAsync(ric);
+                        AppData.DataCache.TryRemove(ric, out var temp);
+
+                    }
+                    newItemList.AddRange(existingList);
+                }
+
+                var genItemList = GenerateItemListAsync(InputRics);
+                newItemList.AddRange(genItemList);
+                newItemList = newItemList.Distinct<string>().ToList<string>();
+
+
+                if (newItemList.Any())
+                {
+                    foreach (var addItem in newItemList)
+                    {
+                        if (!SubscriptionStatus.ContainsKey(addItem))
+                            SubscriptionStatus.Add(addItem, false);
+                    }
+                    FetchSubmit(newItemList).GetAwaiter().GetResult();
+                }
+                else
+                {
+                    _isRetreiving = false;
+                    this?.InvokeAsync(StateHasChanged);
+                }
+            }).ConfigureAwait(false);
+        }
+        else if (buttonName == "LogoffBtn")
+        {
+            await LogoffAsync().ConfigureAwait(false);
+        }
+
+        else if (buttonName == "csv_export")
+        {
+            ExportDataToCsvFile();
+        }
+        else if (buttonName == "riclist_export")
+        {
+            ExportRICListToFile();
+        }
+    }
+
+    void ExportDataToCsvFile()
+    {
+
+        ExportData.RawData[AppData.CurrentUserName] = AppData;
+        NavigationManager.NavigateTo($"/api/Export/CSV?username={AppData.CurrentUserName}", true);
+
+    }
+    void ExportRICListToFile()
+    {
+
+        ExportData.RawData[AppData.CurrentUserName] = AppData;
+        NavigationManager.NavigateTo($"/api/Export/RICList?username={AppData.CurrentUserName}", true);
+
+    }
+    async void RemoveItem(MarketPriceReport item)
+    {
+        if (item == null)
+        {
+            var count = AppData.DataCache.Keys.Count;
+            var notifymessage = new NotificationMessage()
+            {
+                Summary = "Item remove",
+                Detail = $"\n{count} items will be removed",
+                Severity = NotificationSeverity.Warning,
+                Duration = 4000
+            };
+            await ShowItemNotificationAsync(notifymessage).ConfigureAwait(false);
+
+            foreach (var ric in AppData.DataCache.Keys)
+            {
+
+                await RdpMarketPriceService.CloseItemStreamAsync(ric).ConfigureAwait(false);
+                AppData.DataCache.TryRemove(ric, out var temp);
+
+            }
+            GraphVisible = false;
+
+            notifymessage = new NotificationMessage()
+            {
+                Summary = "Items remove complete",
+                Detail = $"{count} items has been removed",
+                Severity = NotificationSeverity.Success,
+                Duration = 4000
+            };
+            await ShowItemNotificationAsync(notifymessage).ConfigureAwait(false);
+        }
+        else
+        {
+            await RdpMarketPriceService.CloseItemStreamAsync(item.RicName).ConfigureAwait(false);
+            if (AppData.DataCache.TryRemove(item.RicName, out var temp) && AppData.UseRDP)
+            {
+                if (SelectedRicName == item.RicName)
+                    GraphVisible = false;
+            }
+        }
+        this?.InvokeAsync(StateHasChanged);
+    }
+
+    async Task LogoffAsync()
+    {
+        foreach (var item in AppData.DataCache.Keys)
+        {
+            await RdpMarketPriceService.CloseItemStreamAsync(item).ConfigureAwait(false);
+        }
+        AppData.DataCache.Clear();
+        RdpSession.CloseSession();
+        RdpSession.IsLoggedIn = false;
+        RdpSession.SessionState = Session.State.Closed;
+        this?.InvokeAsync(StateHasChanged);
+        NavigationManager.NavigateTo("Login");
+    }
+
+    private Task<List<string>> ExpandChainRicAsync(string chainRic)
+    {
+        return Task.Run(() =>
+        {
+            bool isReady = false;
+            var constituents = new List<string>();
+            _chainExpander.OnExtractionCompleteEvent += ((e, v) =>
+            {
+                foreach (var ric in v.ItemList)
+                {
+                    if (!constituents.Contains(ric))
+                        constituents.Add(ric);
+                }
+                isReady = true;
+            });
+            _chainExpander.RunExtractionAsync(chainRic, false);
+            while (!isReady) ;
+            return constituents;
+        });
+    }
+    private async Task FetchSubmit(List<string> itemList)
+    {
+
+        var sentList = new List<string>();
+        var duplicateList = new List<string>();
+
+        foreach (var itemname in itemList)
+        {
+
+            var data = new MarketPriceReport { RicName = itemname };
+            if (AppData.DataCache.TryAdd(itemname, data))
+            {
+                if (AppData.columnValues.Any())
+                {
+                    var fields = AppData.columnValues.ToList<string>();
+                    if (!fields.Contains("CURRENCY"))
+                        fields.Add("CURRENCY");
+                    await RdpMarketPriceService.OpenItemAsync(itemname, RdpSession.ServiceSession, fields, false).ConfigureAwait(false);
+                }
+                else
+                    await RdpMarketPriceService.OpenItemAsync(itemname, RdpSession.ServiceSession, defaultFieldList, false).ConfigureAwait(false);
+                sentList.Add(itemname);
+            }
+            else
+            {
+                duplicateList.Add(itemname);
+                SubscriptionStatus.Remove(itemname);
+            }
+        }
+
+        var notifymessage = new NotificationMessage()
+        {
+            Summary = "Request Duplicate",
+            Severity = NotificationSeverity.Warning,
+            Duration = 2000
+        };
+        if (duplicateList.Any() && duplicateList.Count <= 15)
+        {
+            notifymessage.Detail = $"{string.Join(' ', duplicateList)} already in the list";
+            await ShowItemNotificationAsync(notifymessage).ConfigureAwait(false);
+        }
+        else if (duplicateList.Count > 15)
+        {
+            notifymessage.Detail = $"{duplicateList.Count} items already in the list";
+            await ShowItemNotificationAsync(notifymessage).ConfigureAwait(false);
+        }
+
+        var notifySentMessage = new NotificationMessage()
+        {
+            Summary = "Request Sent",
+            Severity = NotificationSeverity.Info,
+            Duration = 4000
+        };
+        if (sentList.Any() && sentList.Count <= 15)
+        {
+            notifySentMessage.Detail = $"Sent a new request for {string.Join(" ", sentList)}";
+            await ShowItemNotificationAsync(notifySentMessage).ConfigureAwait(false);
+        }
+        else if (sentList.Count > 15)
+        {
+            notifySentMessage.Detail = $"Sent a new request for {sentList.Count} items";
+            await ShowItemNotificationAsync(notifySentMessage).ConfigureAwait(false);
+        }
+        InputRics = string.Empty;
+        if (SubscriptionStatus.Count == 0 || (itemList.Count == duplicateList.Count))
+            _isRetreiving = false;
+        this?.InvokeAsync(StateHasChanged);
+    }
+
+
+    private void OnRespMessage(object o, OnResponseMessageEventArgs e)
+    {
+
+        try
+        {
+            switch (e.MessageType)
+            {
+                case MessageTypeEnum.Refresh:
+                    {
+                        Task.Run(() =>
+                        {
+                            var refreshMessage = e.RespMessage as MarketPriceRefreshMessage;
+                            var itemName = refreshMessage.Key != null ? refreshMessage.Key.Name.FirstOrDefault() : string.Empty;
+                            if (refreshMessage.Fields != null)
+                            {
+                                //var fxrateData = (MarketPriceReport)RdpMarketPriceService.FieldListToMarketPriceData<MarketPriceReport>(refreshMessage.Fields);
+                                var fxrateData = new MarketPriceReport();
+                                fxrateData.StreamId = refreshMessage.ID;
+                                fxrateData.RicName = itemName;
+                                fxrateData.Fields = refreshMessage.Fields;
+
+                                AppData.DataCache.AddOrUpdate(itemName, fxrateData, (oldkey, oldvalue) => fxrateData);
+
+                                if (SubscriptionStatus.ContainsKey(itemName))
+                                {
+                                    SubscriptionStatus[itemName] = true;
+
+                                }
+                                if (SubscriptionStatus.ToList().All(x => x.Value == true))
+                                {
+                                    _isRetreiving = false;
+                                    this?.InvokeAsync(StateHasChanged);
+
+                                }
+
+                            }
+
+                        });
+                    }
+                    break;
+
+                case MessageTypeEnum.Status:
+                    {
+                        if (e.RespMessage is StatusMessage statusMessage)
+                        {
+                            var itemName = statusMessage.Key.Name?.FirstOrDefault();
+                            var statusText = statusMessage.State.Text;
+
+
+                            if (statusMessage.State.Stream == StreamStateEnum.Closed || statusMessage.State.Stream == StreamStateEnum.ClosedRecover)
+                            {
+                                if (SubscriptionStatus.ContainsKey(itemName))
+                                {
+                                    SubscriptionStatus[itemName] = true;
+
+                                }
+                                if (AppData.DataCache.TryRemove(itemName, out var temp))
+                                {
+
+                                }
+
+                            }
+                            if (SubscriptionStatus.ToList().All(x => x.Value == true))
+                            {
+                                _isRetreiving = false;
+                                this?.InvokeAsync(StateHasChanged);
+                            }
+                            var notifymessage = new NotificationMessage()
+                            {
+                                Summary = $"{itemName} Status",
+                                Detail = $"{statusText},items has been removed from the list.",
+                                Severity = NotificationSeverity.Warning,
+                                Duration = 2000
+                            };
+                            ShowItemNotificationAsync(notifymessage).ConfigureAwait(false);
+
+                        }
+                    }
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            DialogName = "Error";
+            DialogRespType = "Generic Error";
+            DialogContent = ex.Message;
+            ShowItemDialogAsync().GetAwaiter();
+            this?.InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void OnItemError(object o, OnErrorEventArgs e)
+    {
+        DialogName = "Application Error";
+        DialogRespType = "General Error";
+        DialogContent = e.Message;
+        ShowItemDialogAsync().GetAwaiter();
+
+        this?.InvokeAsync(StateHasChanged);
+    }
+
+
+    async Task ShowItemDialogAsync() => await DialogService.OpenAsync(@DialogName, ds =>
+            @<RadzenCard Style="padding: 20px;">
+                <p Style="margin-bottom: 10px;">@DialogRespType</p>
+                <div class="row">
+                    <div class="col-md-12">
+                        @DialogContent
+                        <br /><RadzenButton Text="Close" Click="() => ds.Close(true)" Style="margin-bottom: 10px; width: 150px" />
+                    </div>
+                </div>
+            </RadzenCard>);
+
+    async Task ShowItemNotificationAsync(NotificationMessage message)
+    {
+        if (message == null) return;
+        NotificationService.Notify(message);
+        await (this?.InvokeAsync(StateHasChanged)).ConfigureAwait(false);
+    }
+
+    public void Dispose()
+    {
+        RdpMarketPriceService.OnErrorEvents -= OnItemError;
+        RdpMarketPriceService.OnResponeMessageEvents -= OnRespMessage;
+        _chartTable?.Dispose();
+        DialogService?.Dispose();
+    }
+}
+
+
+
