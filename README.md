@@ -483,7 +483,7 @@ info: Microsoft.Hosting.Lifetime[0]
 ```
 You can open https://localhost:5001 in the Chrome web browser, and it will show the Web Application first page like this.
 
-![web firstpage](images/mainpage.PNG)
+![web firstpage](images/mainpage.png)
 
 You can click Login to use the web application. And it will route to the main application page. Below is a sample main page with the description for each bullet in the page.
 
