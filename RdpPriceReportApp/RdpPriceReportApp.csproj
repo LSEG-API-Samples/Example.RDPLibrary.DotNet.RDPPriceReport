@@ -23,7 +23,7 @@
   <ItemGroup>
     <PackageReference Include="CsvHelper" Version="15.0.5" />
     <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.10.9" />
-    <PackageReference Include="Radzen.Blazor" Version="2.10.16" />
+    <PackageReference Include="Radzen.Blazor" Version="2.11.8" />
     <PackageReference Include="Refinitiv.DataPlatform" Version="1.0.0-alpha" />
   </ItemGroup>
 

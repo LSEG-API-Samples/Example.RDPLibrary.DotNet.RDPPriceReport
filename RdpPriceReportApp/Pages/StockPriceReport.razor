@@ -536,11 +536,16 @@
                     }
                     newItemList.AddRange(existingList);
                 }
-
-                var genItemList = GenerateItemListAsync(InputRics);
-                newItemList.AddRange(genItemList);
-                newItemList = newItemList.Distinct<string>().ToList<string>();
-
+                if (!string.IsNullOrEmpty(InputRics))
+                {
+                    var genItemList = GenerateItemListAsync(InputRics);
+                    newItemList.AddRange(genItemList);
+                    newItemList = newItemList.Distinct<string>().ToList<string>();
+                }
+                else
+                {
+                    InputRics = string.Empty;
+                }
 
                 if (newItemList.Any())
                 {
