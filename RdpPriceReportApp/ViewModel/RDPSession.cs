@@ -25,9 +25,7 @@ namespace RdpPriceReportApp.ViewModel
         #endregion
 
         private ISession _session;
-        internal ISession ServiceSession => _session != null
-                ? _session
-                : throw new Exception("Please call InitWebSocketConnectionAsync to initialize RdpSession ");
+        internal ISession ServiceSession => _session ?? throw new Exception("Please call InitWebSocketConnectionAsync to initialize RdpSession ");
         //IStream stream;
         public Session.State SessionState { get; internal set; }
         public bool IsLoggedIn { get; set; }
@@ -61,29 +59,29 @@ namespace RdpPriceReportApp.ViewModel
                         .WithDacsUserName(TrepUsername)
                         .WithDacsApplicationID(TrepAppid)
                         .WithDacsPosition(TrepPosition)
-                        .OnState(processOnState)
-                        .OnEvent(processOnEvent));
+                        .OnState(ProcessOnState)
+                        .OnEvent(ProcessOnEvent));
                 }
                 else
                 {
                     System.Console.WriteLine("Start RDP PlatformSession");
                     _session = CoreFactory.CreateSession(new PlatformSession.Params()
-                        .OAuthGrantType(new GrantPassword().UserName(RdpUser)
+                        .WithOAuthGrantType(new GrantPassword().UserName(RdpUser)
                             .Password(RdpPassword))
                         .AppKey(RdpAppKey)
                         .WithTakeSignonControl(true)
-                        .OnState(processOnState)
-                        .OnEvent(processOnEvent));
+                        .OnState(ProcessOnState)
+                        .OnEvent(ProcessOnEvent));
                 }
                 _session.OpenAsync().ConfigureAwait(false);
 
             });
         }
-        private void processOnEvent(ISession session, Session.EventCode code, JObject message)
+        private void ProcessOnEvent(ISession session, Session.EventCode code, JObject message)
         {
             RaiseSessionEvent(code, message);
         }
-        private void processOnState(ISession session, Session.State state, string message)
+        private void ProcessOnState(ISession session, Session.State state, string message)
         {
             SessionState = state;
             RaiseStateChanged(state, message);

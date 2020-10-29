@@ -19,7 +19,7 @@
 @inject DialogService DialogService
 @inject AppData AppData
 @inject ExportData ExportData
-
+@inject IJSRuntime JSRuntime
 
 <h3>RDP Real-Time Pricing </h3>
 
@@ -77,10 +77,21 @@
 <div class="row">
     <div class="col-4"></div>
     <div class="col-2">
-        <RadzenButton Click="@((args) => Click(args, "riclist_export"))" Text="RICs" Icon="save_alt" Style="margin-left: 20px; margin-bottom: 20px;" />
+        <p>
+            <button class="btn btn-primary" @onclick="OnClickExportItemListButton">
+                <span class="oi oi-cloud-download" aria-hidden="true"></span>
+                RICs
+            </button>
+        </p>
+       
     </div>
     <div class="col-2">
-        <RadzenButton Click="@((args) => Click(args, "csv_export"))" Text="CSV" Icon="save_alt" Style="margin-left:20px;margin-bottom:20px;" />
+        <p>
+            <button class="btn btn-primary" @onclick="OnClickExportToCSVButton">
+                <span class="oi oi-cloud-download" aria-hidden="true"></span>
+                CSV
+            </button>
+        </p>
     </div>
     <div class="col-4"></div>
 </div>
@@ -302,6 +313,8 @@
 
     protected override void OnInitialized()
     {
+
+        NavigationManager.LocationChanged += HandleLocationChanged;
         if (RdpSession.SessionState != Session.State.Opened && !RdpSession.IsLoggedIn)
             NavigationManager.NavigateTo("Login");
         else
@@ -318,6 +331,32 @@
             defaultFieldList = list;
         }
 
+    }
+    /// Apply helper function from https://github.com/sample-by-jsakamoto/Blazor-DownloadFIles 
+    /// Original codes use NavigationManager.NavigteTo and it cause Blazor Server circuit down issue so workaround for now is to call java script instead.
+    private async Task OnClickExportToCSVButton()
+    {
+        var res = await JSRuntime.InvokeAsync<bool>("confirm", "Do you want to export data to CSV file?");
+        if (res == false) return;
+        ExportData.RawData[AppData.CurrentUserName] = AppData;
+        var downloadurl = $"/api/Export/CSV?username={AppData.CurrentUserName}";
+        await JSRuntime.InvokeVoidAsync(
+            "downloadFromUrl",
+            new { Url =downloadurl, FileName = "exportdata.csv" });
+    }
+    private async Task OnClickExportItemListButton()
+    {
+        var res = await JSRuntime.InvokeAsync<bool>("confirm", "Do you want to export RIC list to file?");
+        if (res == false) return;
+        ExportData.RawData[AppData.CurrentUserName] = AppData;
+        var downloadurl = $"/api/Export/RICList?username={AppData.CurrentUserName}";
+        await JSRuntime.InvokeVoidAsync(
+            "downloadFromUrl",
+            new { Url =downloadurl, FileName = "RIClist.txt" });
+    }
+    private void HandleLocationChanged(object sender, LocationChangedEventArgs e)
+    {
+        //...
     }
     string FormatCurrency(object value)
     {
@@ -511,6 +550,7 @@
 
 
     }
+
     async void Click(MouseEventArgs args, string buttonName)
     {
         if (buttonName == "FetchBtn")
@@ -568,31 +608,8 @@
         {
             await LogoffAsync().ConfigureAwait(false);
         }
-
-        else if (buttonName == "csv_export")
-        {
-            ExportDataToCsvFile();
-        }
-        else if (buttonName == "riclist_export")
-        {
-            ExportRICListToFile();
-        }
     }
 
-    void ExportDataToCsvFile()
-    {
-
-        ExportData.RawData[AppData.CurrentUserName] = AppData;
-        NavigationManager.NavigateTo($"/api/Export/CSV?username={AppData.CurrentUserName}", true);
-
-    }
-    void ExportRICListToFile()
-    {
-
-        ExportData.RawData[AppData.CurrentUserName] = AppData;
-        NavigationManager.NavigateTo($"/api/Export/RICList?username={AppData.CurrentUserName}", true);
-
-    }
     async void RemoveItem(MarketPriceReport item)
     {
         if (item == null)
@@ -743,42 +760,42 @@
 
     private void OnRespMessage(object o, OnResponseMessageEventArgs e)
     {
-        Task.Run(() =>
-        {
+        //Task.Run(() =>
+        //{
         try
         {
             switch (e.MessageType)
             {
                 case MessageTypeEnum.Refresh:
                     {
-                      
-                            var refreshMessage = e.RespMessage as MarketPriceRefreshMessage;
-                            var itemName = refreshMessage.Key != null ? refreshMessage.Key.Name.FirstOrDefault() : string.Empty;
-                            if (refreshMessage.Fields != null)
+
+                        var refreshMessage = e.RespMessage as MarketPriceRefreshMessage;
+                        var itemName = refreshMessage.Key != null ? refreshMessage.Key.Name.FirstOrDefault() : string.Empty;
+                        if (refreshMessage.Fields != null)
+                        {
+                            //var fxrateData = (MarketPriceReport)RdpMarketPriceService.FieldListToMarketPriceData<MarketPriceReport>(refreshMessage.Fields);
+                            var fxrateData = new MarketPriceReport();
+                            fxrateData.StreamId = refreshMessage.ID;
+                            fxrateData.RicName = itemName;
+                            fxrateData.Fields = refreshMessage.Fields;
+
+                            AppData.DataCache.AddOrUpdate(itemName, fxrateData, (oldkey, oldvalue) => fxrateData);
+
+                            if (SubscriptionStatus.ContainsKey(itemName))
                             {
-                                //var fxrateData = (MarketPriceReport)RdpMarketPriceService.FieldListToMarketPriceData<MarketPriceReport>(refreshMessage.Fields);
-                                var fxrateData = new MarketPriceReport();
-                                fxrateData.StreamId = refreshMessage.ID;
-                                fxrateData.RicName = itemName;
-                                fxrateData.Fields = refreshMessage.Fields;
+                                SubscriptionStatus[itemName] = true;
 
-                                AppData.DataCache.AddOrUpdate(itemName, fxrateData, (oldkey, oldvalue) => fxrateData);
-
-                                if (SubscriptionStatus.ContainsKey(itemName))
-                                {
-                                    SubscriptionStatus[itemName] = true;
-
-                                }
-                                if (SubscriptionStatus.ToList().All(x => x.Value == true))
-                                {
-                                    _isRetreiving = false;
-                                    this?.InvokeAsync(StateHasChanged);
-
-                                }
+                            }
+                            if (SubscriptionStatus.ToList().All(x => x.Value == true))
+                            {
+                                _isRetreiving = false;
+                                this?.InvokeAsync(StateHasChanged);
 
                             }
 
-                     
+                        }
+
+
                     }
                     break;
 
@@ -830,7 +847,7 @@
             ShowItemDialogAsync().GetAwaiter();
             this?.InvokeAsync(StateHasChanged);
         }
-        });
+        //});
     }
 
     private void OnItemError(object o, OnErrorEventArgs e)
@@ -864,6 +881,7 @@
 
     public void Dispose()
     {
+        NavigationManager.LocationChanged -= HandleLocationChanged;
         RdpMarketPriceService.OnErrorEvents -= OnItemError;
         RdpMarketPriceService.OnResponeMessageEvents -= OnRespMessage;
         _chartTable?.Dispose();
