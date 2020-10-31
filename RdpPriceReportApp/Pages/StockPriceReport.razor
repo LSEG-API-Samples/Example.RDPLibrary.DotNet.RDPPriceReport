@@ -360,7 +360,13 @@
     }
     string FormatCurrency(object value)
     {
-        return AppData.DataCache.TryGetValue(SelectedRicName, out var temp) ? (temp.Fields.ContainsKey("CURRENCY")?ObjectExtensions.FormatCurrency((double)value, temp.Fields["CURRENCY"], false):$"{value}") : $"{value}";
+        try
+        {
+            return AppData.DataCache.TryGetValue(SelectedRicName, out var temp) ? (temp.Fields.ContainsKey("CURRENCY") ? ObjectExtensions.FormatCurrency((double)value, temp.Fields["CURRENCY"], false) : $"{value}") : $"{value}";
+        }catch(Exception ex)
+        {
+            return $"{value}";
+        }
     }
 
 
